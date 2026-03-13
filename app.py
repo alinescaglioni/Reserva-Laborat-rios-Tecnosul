@@ -1,74 +1,41 @@
 import streamlit as st
 import pandas as pd
-import os
-from datetime import time, datetime
+from datetime import datetime
 
-# Configuração do Banco de Dados em CSV
-ARQUIVO_BANCO = "reservas_tecnosul.csv"
-LABS = ["Criar LAB (Espaço Maker)", "Laboratório MEDGEN (Biotecnologia)", "Laboratório de Ensaios Experimentais"]
+# --- CONFIGURAÇÃO DOS HORÁRIOS PERMITIDOS ---
+horarios_disponiveis = ["08:00", "09:00", "10:00", "11:00", "13:00", "14:00", "15:00", "16:00", "17:00"]
 
-def carregar_dados():
-    # Definimos as colunas atualizadas
-    colunas = ["Nome Completo", "Laboratório", "Data", "Início", "Término"]
-    if os.path.exists(ARQUIVO_BANCO):
-        df = pd.read_csv(ARQUIVO_BANCO)
-        # Verifica se o CSV antigo tem as colunas novas, se não, reseta
-        if "Início" not in df.columns:
-            return pd.DataFrame(columns=colunas)
-        return df
-    return pd.DataFrame(columns=colunas)
+st.title("Sistema de Agendamento Profissional")
 
-def salvar_dados(df):
-    df.to_csv(ARQUIVO_BANCO, index=False)
+# 1. ENTRADA DE DADOS
+data_selecionada = st.date_input("Escolha a data", min_value=datetime.today())
+horario_selecionado = st.selectbox("Escolha o horário", horarios_disponiveis)
+nome_cliente = st.text_input("Seu nome completo")
 
-st.title("📍 Reserva de Laboratórios - Tecnosul")
+# Simulação de carregamento de dados (Substitua pela sua lógica de leitura de arquivo/planilha)
+# Se você estiver usando um CSV, o código abaixo verifica se já existe o agendamento
+try:
+    df_reservas = pd.read_csv("reservas.csv")
+except FileNotFoundError:
+    df_reservas = pd.DataFrame(columns=["Data", "Horário", "Cliente"])
 
-# Interface de Agendamento
-with st.expander("➕ Realizar Nova Reserva", expanded=True):
-    with st.form("form_reserva", clear_on_submit=True):
-        nome = st.text_input("Nome Completo")
-        lab_selecionado = st.selectbox("Selecione o Laboratório", LABS)
-        data = st.date_input("Data do Agendamento", min_value=datetime.today())
+if st.button("Confirmar Agendamento"):
+    if nome_cliente == "":
+        st.error("Por favor, preencha seu nome.")
+    else:
+        # 2. VERIFICAÇÃO DE DISPONIBILIDADE
+        # Filtra se já existe uma linha com a mesma data e mesmo horário
+        conflito = df_reservas[(df_reservas['Data'] == str(data_selecionada)) & 
+                               (df_reservas['Horário'] == horario_selecionado)]
         
-        col1, col2 = st.columns(2)
-        with col1:
-            h_inicio = st.time_input("Horário de Início", value=time(8, 0))
-        with col2:
-            h_termino = st.time_input("Horário de Término", value=time(9, 0))
-        
-        botao = st.form_submit_button("Confirmar Reserva")
-
-    if botao:
-        # Validações
-        hora_abertura = time(8, 0)
-        hora_fechamento = time(18, 0)
-
-        if not (hora_abertura <= h_inicio <= hora_fechamento) or not (hora_abertura <= h_termino <= hora_fechamento):
-            st.error("⚠️ As reservas só podem ser feitas entre as 08h e as 18h.")
-        elif h_termino <= h_inicio:
-            st.error("⚠️ O horário de término deve ser após o horário de início.")
-        elif not nome:
-            st.error("⚠️ Por favor, informe seu nome completo.")
+        if not conflito.empty:
+            st.error(f"Sinto muito! O horário {horario_selecionado} no dia {data_selecionada} já está ocupado.")
         else:
-            df_atual = carregar_dados()
-            nova_reserva = pd.DataFrame([[
-                nome, 
-                lab_selecionado, 
-                data.strftime("%d/%m/%Y"), 
-                h_inicio.strftime("%H:%M"), 
-                h_termino.strftime("%H:%M")
-            ]], columns=df_atual.columns)
+            # 3. SALVAR NOVA RESERVA
+            nova_reserva = pd.DataFrame([[str(data_selecionada), horario_selecionado, nome_cliente]], 
+                                        columns=["Data", "Horário", "Cliente"])
+            df_reservas = pd.concat([df_reservas, nova_reserva], ignore_index=True)
+            df_reservas.to_csv("reservas.csv", index=False)
             
-            df_final = pd.concat([df_atual, nova_reserva], ignore_index=True)
-            salvar_dados(df_final)
-            st.success(f"✅ Sucesso! {lab_selecionado} reservado para {nome}.")
-            st.rerun()
-
-# Exibição da Planilha
-st.subheader("📋 Cronograma de Reservas")
-df_lista = carregar_dados()
-if not df_lista.empty:
-    # Ordenar por data e hora de início
-    st.dataframe(df_lista.sort_values(by=["Data", "Início"]), use_container_width=True)
-else:
-    st.info("Nenhuma reserva encontrada na planilha.")
+            st.success(f"Agendamento realizado com sucesso para {nome_cliente} às {horario_selecionado}!")
+            st.balloons()
