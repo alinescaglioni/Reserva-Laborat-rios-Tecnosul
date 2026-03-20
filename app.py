@@ -1,77 +1,147 @@
 import streamlit as st
 import pandas as pd
-from datetime import datetime, timedelta
+from datetime import datetime, time
 
-# --- CONFIGURAÇÕES ---
-# Atualizado para os laboratórios do Pelotas Parque Tecnológico
-laboratorios_ppt = [
-    "Criar LAB", 
-    "Laboratório de Validação (Produtos da Saúde)", 
-    "Laboratório MEDGEN (Biotecnológia)"
+# --- CONFIGURAÇÃO DA PÁGINA ---
+st.set_page_config(page_title="TECNOSUL - Agendamento de Labs", layout="wide")
+
+# --- SIMULAÇÃO DE BANCO DE DADOS ---
+if 'reservas' not in st.session_state:
+    st.session_state.reservas = pd.DataFrame(columns=[
+        "ID", "Usuário", "Empresa", "Professor", "Projeto", 
+        "Laboratório", "Data", "Início", "Término", "Equipamentos", "Status"
+    ])
+
+# --- CONSTANTES E REGRAS ---
+LABS = ["CRIAR LAB", "MEDGEN", "CON LAB"]
+EQUIPAMENTOS_MEDGEN = [
+    "Banho seco com agitação", "Centrífuga refrigerada", 
+    "Conjunto Micropipetas", "Espectrofotômetro Nanodrop",
+    "Microcentrífuga (24 tubos)", "Sequenciador MiSeq i100",
+    "Workstation DNA/RNA", "Freezer/Geladeira", "Computadores de análise"
 ]
 
-horarios_inicio = ["08:00", "09:00", "10:00", "11:00", "13:00", "14:00", "15:00", "16:00", "17:00", "18:00"]
-
-st.set_page_config(page_title="PPT - Marcação de Labs", layout="wide", page_icon="🏢")
-
-# Título solicitado
-st.title("🏢 Marcação de Laboratórios do Pelotas Parque Tecnológico")
-
-# --- BANCO DE DADOS (CSV) ---
-try:
-    df_reservas = pd.read_csv("reservas_ppt.csv")
-except FileNotFoundError:
-    df_reservas = pd.DataFrame(columns=["Laboratório", "Data", "Início", "Término", "Responsável"])
-
-# --- ÁREA DE AGENDAMENTO ---
-with st.expander("➕ Realizar Novo Agendamento", expanded=True):
-    col1, col2, col3 = st.columns(3)
-
-    with col1:
-        lab_selecionado = st.selectbox("Selecione o Laboratório", laboratorios_ppt)
-        nome_responsavel = st.text_input("Nome do Responsável / Empresa")
-
-    with col2:
-        data_selecionada = st.date_input("Data do Uso", min_value=datetime.today())
-        hora_inicio_sel = st.selectbox("Horário de Início", horarios_inicio)
-
-    with col3:
-        # Cálculo automático da hora de término (1 hora depois do início)
-        hora_dt = datetime.strptime(hora_inicio_sel, "%H:%M")
-        hora_termino_sugerida = (hora_dt + timedelta(hours=1)).strftime("%H:%M")
-        hora_termino_sel = st.text_input("Horário de Término", value=hora_termino_sugerida)
-
-    if st.button("Confirmar Agendamento"):
-        if nome_responsavel == "":
-            st.warning("Por favor, identifique o responsável pela reserva.")
-        else:
-            # VERIFICAÇÃO DE CONFLITO (Mesmo Lab + Mesma Data + Mesmo Horário)
-            conflito = df_reservas[
-                (df_reservas['Laboratório'] == lab_selecionado) & 
-                (df_reservas['Data'] == str(data_selecionada)) & 
-                (df_reservas['Início'] == hora_inicio_sel)
-            ]
-            
-            if not conflito.empty:
-                st.error(f"⚠️ Atenção: O {lab_selecionado} já possui reserva para este horário.")
-            else:
-                nova_reserva = pd.DataFrame([[lab_selecionado, str(data_selecionada), hora_inicio_sel, hora_termino_sel, nome_responsavel]], 
-                                           columns=["Laboratório", "Data", "Início", "Término", "Responsável"])
-                df_reservas = pd.concat([df_reservas, nova_reserva], ignore_index=True)
-                df_reservas.to_csv("reservas_ppt.csv", index=False)
-                st.success(f"Reserva no {lab_selecionado} confirmada!")
-                st.balloons()
-                st.rerun()
-
-# --- QUADRO DE RESERVAS ---
-st.markdown("---")
-st.subheader("📅 Quadro de Ocupação")
-
-if df_reservas.empty:
-    st.info("Não há agendamentos registrados para os próximos dias.")
-else:
-    # Ordenar por data e horário para ficar organizado
-    df_lista = df_reservas.sort_values(by=["Data", "Início"], ascending=True)
+def verificar_conflito(lab, data, hora_inicio, hora_fim):
+    df = st.session_state.reservas
+    # Filtra reservas no mesmo dia e lab que não foram reprovadas
+    conflitos = df[(df['Laboratório'] == lab) & (df['Data'] == data) & (df['Status'] != "Reprovado")]
     
-    # Exibe a tabela formatada
-    st.dataframe(df_lista, use_container_width=True, hide_index=True)
+    if lab == "CRIAR LAB":
+        return len(conflitos) >= 4  # Limite de 4 projetos
+    else:
+        return len(conflitos) >= 1  # Limite de 1 projeto (exclusividade)
+
+# --- INTERFACE ---
+st.title("🧪 Sistema de Agendamento de Laboratórios - TECNOSUL")
+
+tab1, tab2 = st.tabs(["📝 Nova Solicitação", "📊 Painel de Gestão"])
+
+with tab1:
+    st.header("Formulário de Reserva")
+    
+    with st.form("form_reserva"):
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            nome = st.text_input("Nome do Usuário*")
+            empresa = st.text_input("Empresa (se aplicável)")
+            professor = st.text_input("Professor Responsável*")
+            projeto = st.text_input("Nome do Projeto/Pesquisa*")
+            
+        with col2:
+            lab_selecionado = st.selectbox("Selecione o Laboratório*", LABS)
+            data_reserva = st.date_input("Data da Reserva", min_value=datetime.now())
+            h_inicio = st.time_input("Hora de Início", value=time(8, 0))
+            h_fim = st.time_input("Hora de Término", value=time(17, 0))
+
+        # Regra de Horário Especial
+        horario_especial = h_inicio < time(8, 0) or h_fim > time(18, 0) or data_reserva.weekday() >= 5
+        
+        if horario_especial:
+            st.warning("⚠️ Horário fora do padrão administrativo. Upload de autorização obrigatório.")
+            arquivo_auth = st.file_uploader("Upload Autorização (PDF/Imagem)", type=['pdf', 'png', 'jpg'])
+        
+        # Detalhamento MEDGEN
+        equipamentos_sel = []
+        if lab_selecionado == "MEDGEN":
+            st.info("### 🧬 Protocolo MEDGEN")
+            equipamentos_sel = st.multiselect("Selecione os Equipamentos:", EQUIPAMENTOS_MEDGEN)
+            
+            st.markdown("""
+            **EPIs Obrigatórios:**
+            * Jaleco, Luvas e Máscara.
+            * Touca (obrigatória para cabelos soltos).
+            """)
+            concorda_epi = st.checkbox("Estou ciente e concordo em utilizar os EPIs obrigatórios.")
+
+        materiais = st.text_area("Materiais de uso e consumo necessários (opcional)")
+        
+        submit = st.form_submit_button("Enviar Solicitação")
+
+        if submit:
+            # Validações
+            erro = False
+            if not nome or not professor or not projeto:
+                st.error("Preencha todos os campos obrigatórios.")
+                erro = True
+            if horario_especial and arquivo_auth is None:
+                st.error("É necessário anexar a autorização para horários especiais.")
+                erro = True
+            if lab_selecionado == "MEDGEN" and not concorda_epi:
+                st.error("Você deve aceitar os termos de biossegurança do MEDGEN.")
+                erro = True
+            if verificar_conflito(lab_selecionado, data_reserva, h_inicio, h_fim):
+                st.error(f"O laboratório {lab_selecionado} já atingiu a capacidade máxima para este horário.")
+                erro = True
+
+            if not erro:
+                # Salvar no "Banco de Dados"
+                nova_reserva = {
+                    "ID": len(st.session_state.reservas) + 1,
+                    "Usuário": nome, "Empresa": empresa, "Professor": professor,
+                    "Projeto": projeto, "Laboratório": lab_selecionado,
+                    "Data": data_reserva, "Início": h_inicio, "Término": h_fim,
+                    "Equipamentos": ", ".join(equipamentos_sel),
+                    "Status": "Pendente de Aprovação"
+                }
+                st.session_state.reservas = pd.concat([st.session_state.reservas, pd.DataFrame([nova_reserva])], ignore_index=True)
+                st.success("Solicitação enviada com sucesso! Aguarde a aprovação do Responsável (A).")
+
+with tab2:
+    st.header("Gestão e Visualização")
+    
+    # Filtros
+    filtro_lab = st.multiselect("Filtrar por Laboratório", LABS, default=LABS)
+    df_display = st.session_state.reservas[st.session_state.reservas['Laboratório'].isin(filtro_lab)]
+    
+    if df_display.empty:
+        st.write("Nenhuma reserva encontrada.")
+    else:
+        # Tabela de Gestão
+        st.dataframe(df_display, use_container_width=True)
+        
+        # Ações Administrativas (Simuladas)
+        st.divider()
+        st.subheader("Painel Administrativo (Aprovação)")
+        id_aprov = st.number_input("ID da Reserva para Ação", step=1, min_value=1)
+        col_btn1, col_btn2, _ = st.columns([1, 1, 4])
+        
+        if col_btn1.button("✅ Aprovar"):
+            st.session_state.reservas.loc[st.session_state.reservas['ID'] == id_aprov, 'Status'] = "Aprovado"
+            st.rerun()
+            
+        if col_btn2.button("❌ Reprovar"):
+            st.session_state.reservas.loc[st.session_state.reservas['ID'] == id_aprov, 'Status'] = "Reprovado"
+            st.rerun()
+
+# --- SIDEBAR: INFO DOS LABS ---
+st.sidebar.title("Informações dos Labs")
+for lab in LABS:
+    with st.sidebar.expander(f"Ver detalhes {lab}"):
+        if lab == "MEDGEN":
+            st.write("**EPIs:** Jaleco, Luvas, Máscara e Touca.")
+            st.write("**Equipamentos:** Nanodrop, MiSeq i100, etc.")
+        elif lab == "CRIAR LAB":
+            st.write("Capacidade: Até 4 projetos simultâneos.")
+        else:
+            st.write("Foco: Produtos para Saúde.")
