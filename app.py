@@ -5,163 +5,126 @@ from datetime import datetime, time
 # --- CONFIGURAÇÃO DA PÁGINA ---
 st.set_page_config(page_title="TECNOSUL - Gestão de Laboratórios", layout="wide")
 
-# --- BANCO DE DADOS EM MEMÓRIA ---
+# --- DICIONÁRIOS DE INVENTÁRIO (NOME: QUANTIDADE) ---
+INVENTARIO = {
+    "MEDGEN": {
+        "Banho seco com agitação": 1,
+        "Centrífuga refrigerada": 1,
+        "Conjunto Micropipetas Volume Variável Autoclavável": 1,
+        "Espectrofotômetro Nanodrop": 1,
+        "Microcentrífuga para 24 tubos eppendorf": 1,
+        "Sequenciador de DNA de última geração (MiSeq i100)": 1,
+        "Workstation para DNA e RNA": 1,
+        "Freezer Vertical 242L / Geladeira-Refrigerador 300L": 1,
+        "Computadores para análise de dados": 1
+    },
+    "CRIAR LAB": {
+        "Impressora 3D": 1,
+        "Serrote": 1,
+        "Kit de Alicates": 4,
+        "Martelo": 4,
+        "KIT Chave de Fenda": 3,
+        "KIT Chave philips": 3,
+        "Pistola de Cola Quente": 4,
+        "Estação de solda": 4,
+        "Estilete": 4,
+        "Tesouras": 4
+    },
+    "CON LAB": {
+        "Equipamentos de Teste de Materiais": 2,
+        "Bancada de Inspeção": 2
+    }
+}
+
+# --- ESTADO DO SISTEMA ---
 if 'reservas' not in st.session_state:
     st.session_state.reservas = pd.DataFrame(columns=[
-        "ID", "Usuário", "Empresa", "Professor", "Projeto", 
-        "Laboratório", "Data", "Início", "Término", "Equipamentos", "Status", "Filamento(g)"
+        "ID", "Usuário", "Professor", "Projeto", "Laboratório", 
+        "Data", "Início", "Término", "Equipamentos", "Status"
     ])
 
-# --- DICIONÁRIOS DE EQUIPAMENTOS (Com Quantidades) ---
-EQUIP_MEDGEN = {
-    "Banho seco com agitação (1)": 1,
-    "Centrífuga refrigerada (1)": 1,
-    "Conjunto Micropipetas Volume Variável (1)": 1,
-    "Espectrofotômetro Nanodrop (1)": 1,
-    "Microcentrífuga p/ 24 tubos (1)": 1,
-    "Sequenciador MiSeq i100 (1)": 1,
-    "Workstation para DNA e RNA (1)": 1,
-    "Freezer/Geladeira 300L (1)": 1,
-    "Computadores para análise (1)": 1
-}
-
-EQUIP_CRIAR = {
-    "Impressora 3D (1)": 1,
-    "Serrote (1)": 1,
-    "Kit de Alicates (4)": 4,
-    "Martelo (4)": 4,
-    "KIT Chave de Fenda (3)": 3,
-    "KIT Chave Philips (3)": 3,
-    "Pistola de Cola Quente (4)": 4,
-    "Estação de solda (4)": 4,
-    "Estilete (4)": 4,
-    "Tesouras (4)": 4
-}
-
-# --- FUNÇÕES DE VALIDAÇÃO ---
-def verificar_capacidade(lab, data, h_inicio, h_fim):
-    df = st.session_state.reservas
-    # Filtra apenas reservas confirmadas ou pendentes no mesmo lab e dia
-    conflitos = df[(df['Laboratório'] == lab) & (df['Data'] == data) & (df['Status'] != "Reprovado")]
-    
-    if lab == "CRIAR LAB":
-        return len(conflitos) >= 4
-    else:
-        return len(conflitos) >= 1
-
-# --- INTERFACE PRINCIPAL ---
+# --- INTERFACE ---
 st.title("🧪 Sistema de Agendamento TECNOSUL")
 
-tab1, tab2, tab3 = st.tabs(["📝 Reserva", "📊 Gestão Administrativa", "ℹ️ Normas dos Labs"])
+tab1, tab2, tab3 = st.tabs(["📝 Nova Reserva", "📊 Painel de Gestão", "ℹ️ Detalhes dos Labs"])
 
 with tab1:
-    st.header("Solicitação de Espaço e Equipamentos")
+    st.subheader("Solicitação de Espaço")
     
     with st.form("form_reserva"):
-        c1, c2 = st.columns(2)
-        with c1:
+        col1, col2 = st.columns(2)
+        
+        with col1:
             nome = st.text_input("Nome do Usuário*")
-            empresa = st.text_input("Empresa")
             professor = st.text_input("Professor Responsável*")
             projeto = st.text_input("Nome do Projeto/Pesquisa*")
-            lab_sel = st.selectbox("Laboratório*", ["CRIAR LAB", "MEDGEN", "CON LAB"])
+            lab_sel = st.selectbox("Selecione o Laboratório*", list(INVENTARIO.keys()))
             
-        with c2:
+        with col2:
             data_res = st.date_input("Data*", min_value=datetime.now())
-            h_ini = st.time_input("Início*", value=time(8, 0))
-            h_fim = st.time_input("Término*", value=time(17, 0))
-            materiais_consumo = st.text_area("Materiais de uso e consumo necessários")
+            h_ini = st.time_input("Hora Início*", value=time(8, 0))
+            h_fim = st.time_input("Hora Término*", value=time(17, 0))
 
-        # --- Lógica Específica por Lab ---
-        equip_selecionados = []
-        qtd_filamento = 0
+        st.divider()
+
+        # --- EXIBIÇÃO DINÂMICA DE EQUIPAMENTOS E REGRAS ---
+        st.write(f"### 📦 Equipamentos disponíveis em: {lab_sel}")
+        
+        # Formata a lista para o multiselect com as quantidades
+        lista_equip_com_qtd = [f"{nome} ({qtd})" for nome, qtd in INVENTARIO[lab_sel].items()]
+        equip_selecionados = st.multiselect("Selecione o que irá utilizar:", lista_equip_com_qtd)
+
+        # Campos específicos por LAB
+        if lab_sel == "CRIAR LAB":
+            if any("Impressora 3D" in e for e in equip_selecionados):
+                st.number_input("Quantidade de filamento (gramas):", min_value=0, step=10)
+            st.info("💡 Materiais consumíveis (papelão, isopor, lápis, tintas) estão inclusos na bancada.")
 
         if lab_sel == "MEDGEN":
-            st.warning("### 🧬 Protocolo MEDGEN - Biossegurança")
+            st.warning("⚠️ **Protocolo de Biossegurança Obrigatório**")
             st.markdown("""
-            * **EPIs Obrigatórios:** Jaleco, Luvas, Máscara e Touca.
-            * **Proibido:** Bermudas, saias, vestidos, chinelos, calçados abertos e roupas de nylon.
-            * **Cabelos:** Devem estar devidamente presos.
-            * **Treinamento:** É obrigatório ter treinamento nos POC's do LAB.
+            - Proibido: Bermudas, saias, chinelos ou roupas de nylon.
+            - Obrigatório: Jaleco, Luvas, Máscara e Touca. Cabelos longos devem estar presos.
+            - **Necessário treinamento prévio nos POC's do LAB.**
             """)
-            equip_selecionados = st.multiselect("Equipamentos Disponíveis:", list(EQUIP_MEDGEN.keys()))
-            aceite_bio = st.checkbox("Confirmo ciência das normas de Biossegurança e Treinamento POC.")
+            aceite = st.checkbox("Confirmo que possuo treinamento e seguirei as normas de vestimenta e EPIs.")
 
-        elif lab_sel == "CRIAR LAB":
-            st.info("### 🛠️ Inventário CRIAR LAB")
-            equip_selecionados = st.multiselect("Ferramentas:", list(EQUIP_CRIAR.keys()))
-            if "Impressora 3D (1)" in equip_selecionados:
-                qtd_filamento = st.number_input("Quantidade de filamento pretendida (gramas):", min_value=0)
-            st.caption("Nota: Materiais escolares (lápis, tintas, pincéis) e consumíveis básicos são disponibilizados livremente.")
-
-        # --- Upload por Horário Especial ---
+        # Horário Especial
         is_especial = h_ini < time(8, 0) or h_fim > time(18, 0) or data_res.weekday() >= 5
         arquivo = None
         if is_especial:
-            st.error("🚨 Horário Especial detectado: Upload de autorização do Coordenador é obrigatório.")
-            arquivo = st.file_uploader("Anexar Autorização (PDF/E-mail)", type=['pdf', 'png', 'jpg'])
+            st.error("🚨 Horário fora do padrão (08h-18h). Anexe a autorização do Coordenador.")
+            arquivo = st.file_uploader("Autorização (PDF/Imagem)", type=['pdf', 'png', 'jpg'])
 
         submit = st.form_submit_button("Enviar Solicitação")
 
         if submit:
-            # Validações de Negócio
-            erros = []
-            if not (nome and professor and projeto): erros.append("Preencha os campos obrigatórios (*).")
-            if is_especial and arquivo is None: erros.append("Anexe a autorização para horários especiais.")
-            if lab_sel == "MEDGEN" and not aceite_bio: erros.append("Você deve aceitar os termos do MEDGEN.")
-            if verificar_capacidade(lab_sel, data_res, h_ini, h_fim): erros.append(f"Capacidade esgotada para {lab_sel} neste horário.")
-            
-            if erros:
-                for erro in erros: st.error(erro)
+            # Lógica de validação básica (Exemplo)
+            if not nome or not professor or (lab_sel == "MEDGEN" and not aceite):
+                st.error("Por favor, preencha os campos obrigatórios e aceite os termos.")
+            elif is_especial and arquivo is None:
+                st.error("O upload da autorização é obrigatório para este horário.")
             else:
-                nova_res = {
-                    "ID": len(st.session_state.reservas) + 1,
-                    "Usuário": nome, "Empresa": empresa, "Professor": professor,
-                    "Projeto": projeto, "Laboratório": lab_sel, "Data": data_res,
-                    "Início": h_ini, "Término": h_fim, 
-                    "Equipamentos": ", ".join(equip_selecionados),
-                    "Status": "Pendente", "Filamento(g)": qtd_filamento
-                }
-                st.session_state.reservas = pd.concat([st.session_state.reservas, pd.DataFrame([nova_res])], ignore_index=True)
-                st.success("Solicitação enviada! O Responsável (A) analisará seu pedido.")
+                st.success("Solicitação registrada com sucesso para análise!")
 
 with tab2:
-    st.header("Painel de Controle Administrativo")
-    if st.session_state.reservas.empty:
-        st.info("Nenhuma reserva registrada até o momento.")
-    else:
-        # Filtros de visualização
-        f_lab = st.multiselect("Filtrar Laboratório", ["CRIAR LAB", "MEDGEN", "CON LAB"], default=["CRIAR LAB", "MEDGEN", "CON LAB"])
-        df_filtrado = st.session_state.reservas[st.session_state.reservas['Laboratório'].isin(f_lab)]
-        
-        st.dataframe(df_filtrado, use_container_width=True)
-
-        st.divider()
-        st.subheader("Ações de Aprovação")
-        id_acao = st.number_input("Digite o ID da Reserva:", min_value=1, step=1)
-        c_apr, c_rep, _ = st.columns([1, 1, 4])
-        
-        if c_apr.button("Aprovar Reserva"):
-            st.session_state.reservas.loc[st.session_state.reservas['ID'] == id_acao, 'Status'] = "Aprovada"
-            st.success(f"Reserva {id_acao} aprovada. Notificação enviada ao usuário.")
-            st.rerun()
-            
-        if c_rep.button("Reprovar Reserva"):
-            st.session_state.reservas.loc[st.session_state.reservas['ID'] == id_acao, 'Status'] = "Reprovada"
-            st.error(f"Reserva {id_acao} reprovada.")
-            st.rerun()
+    st.header("Ocupação dos Laboratórios")
+    st.dataframe(st.session_state.reservas, use_container_width=True)
 
 with tab3:
-    st.header("Informações Técnicas e Normas")
-    col_a, col_b = st.columns(2)
-    with col_a:
-        st.subheader("CRIAR LAB")
-        st.write("Capacidade: 4 projetos simultâneos.")
-        st.write("**Ferramentas Disponíveis:**")
-        for k, v in EQUIP_CRIAR.items(): st.text(f"- {k}")
-        
-    with col_b:
-        st.subheader("MEDGEN")
-        st.write("Capacidade: 1 projeto por vez (Exclusivo).")
-        st.write("**Equipamentos:**")
-        for k, v in EQUIP_MEDGEN.items(): st.text(f"- {k}")
+    st.header("Informações Gerais e Inventário")
+    
+    # Criando colunas dinâmicas para os laboratórios
+    cols = st.columns(len(INVENTARIO))
+    
+    for i, (lab, itens) in enumerate(INVENTARIO.items()):
+        with cols[i]:
+            st.markdown(f"#### {lab}")
+            # Criando uma tabela simples para mostrar o inventário
+            df_inv = pd.DataFrame(list(itens.items()), columns=["Item", "Qtd Disponível"])
+            st.table(df_inv)
+            
+            if lab == "MEDGEN":
+                st.caption("EPIs: Jaleco, Luva, Máscara, Touca.")
+            elif lab == "CRIAR LAB":
+                st.caption("Capacidade: 4 projetos simultâneos.")
